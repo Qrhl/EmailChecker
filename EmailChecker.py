@@ -1,6 +1,7 @@
 import re
 import dns.resolver
 import telnetlib
+import signal
 
 
 class WrongFormatException(Exception):
@@ -37,6 +38,17 @@ class NoSuchUserException(Exception):
 
     def __str__(self):
         return "The user of this email does not exist"
+
+class TimeoutException(Exception):
+    """
+    Exception raised when the connection takes too long
+    """
+
+    def __init__(self):
+        Exception.__init__(self)
+
+    def __str__(self):
+        return "Telnet connection timed out"
 
 
 class EmailChecker:
@@ -104,6 +116,7 @@ class EmailChecker:
         :param mx_address: Address of the SMTP server
         :return: True or raise an exception
         """
+        final_rep = ''
         try:
             conn_tel = telnetlib.Telnet(mx_address, 25)
             conn_tel.read_until(b"\r").decode()
@@ -113,10 +126,10 @@ class EmailChecker:
             conn_tel.read_until(b"\r").decode()
             rcpt_to = "rcpt to:<{0}>\r\n)".format(self.address)
             conn_tel.write(rcpt_to.encode("utf-8"))
-            response = conn_tel.read_until(b"\r").decode()
+            final_rep = conn_tel.read_until(b"\r").decode()
         except Exception as e:
             print(e)
-        if response.find("250") != -1:
+        if final_rep.find("250") != -1:
             return True
         else:
             raise NoSuchUserException
@@ -126,11 +139,20 @@ class EmailChecker:
         Uses the methods above to do a complete check of the email address
         :return: True or raise an exception
         """
+        def timeout_handler(signum, frame):
+            raise TimeoutException
+
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(3)  # triggers alarm in 3 seconds
+
         try:
             self.valid_format()
             domain = self.valid_domain()
+            print(domain)
             self.valid_user(domain)
+        except TimeoutException as e:
+            raise e
         except Exception as e:
             raise e
+        signal.alarm(0)
         return True
-
